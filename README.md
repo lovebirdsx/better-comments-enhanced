@@ -1,4 +1,11 @@
-# Better Comments
+# Better Comments Enhanced
+
+* Folk form [Better Comments](https://marketplace.visualstudio.com/items?itemName=aaron-bond.better-comments) extension.
+* Add support for markdown.
+
+![Markdown Preview](images/better-comments-md.PNG)
+
+## Origin introduction
 
 The Better Comments extension will help you create more human-friendly comments in your code.  
 With this extension, you will be able to categorise your annotations into:
@@ -14,6 +21,9 @@ With this extension, you will be able to categorise your annotations into:
 ## Configuration
 
 This extension can be configured in User Settings or Workspace settings.
+
+`"better-comments.highlightMarkdown": true`
+ This setting will control whether comments in markdown files are styled using the annotation tags.
 
 `"better-comments.multilineComments": true`  
  This setting will control whether multiline comments are styled using the annotation tags.

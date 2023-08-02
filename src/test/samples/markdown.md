@@ -1,14 +1,23 @@
-### some markdown
-## Some other header
+# Title
 
-* bullet point
-* bullet point 2
+## Bullet Point
 
-<!-- comments -->
-<!-- ! comments -->
-<!-- * comments -->
-<!-- ? comments -->
-<!-- TODO comments -->
-<!--
-    ! comments 
--->
+* First
+* ? Second
+* ! Third
+
+## Todos
+
+* [ ] Normal things
+* [ ] ! Very important
+* [ ] * Access Later
+
+
+## Code
+
+``` ts
+// ! This is important
+function important() {
+    console.log('important')
+}
+```

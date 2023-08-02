@@ -4,6 +4,74 @@ import * as vscode from 'vscode';
 import * as json5 from 'json5'
 import { TextDecoder } from 'util';
 
+const MARKDOWN_CODE_TO_LANGUAGE_MAP = new Map<string, string>([
+    ['bash', 'bash'],
+    ['bat', 'bat'],
+    ['batch', 'bat'],
+    ['c', 'c'],
+    ['clj', 'clojure'],
+    ['clojure', 'clojure'],
+    ['cpp', 'cpp'],
+    ['cs', 'csharp'],
+    ['csharp', 'csharp'],
+    ['css', 'css'],
+    ['docker', 'dockerfile'],
+    ['dockerfile', 'dockerfile'],
+    ['elixir', 'elixir'],
+    ['erl', 'erlang'],
+    ['erlang', 'erlang'],
+    ['ex', 'elixir'],
+    ['fs', 'fsharp'],
+    ['fsharp', 'fsharp'],
+    ['go', 'go'],
+    ['gradle.kts', 'groovy'],
+    ['gradle.kts', 'groovy'],
+    ['gradle', 'groovy'],
+    ['groovy', 'groovy'],
+    ['haskell', 'haskell'],
+    ['hs', 'haskell'],
+    ['html', 'html'],
+    ['ini', 'ini'],
+    ['java', 'java'],
+    ['javascript', 'javascript'],
+    ['js', 'javascript'],
+    ['json', 'json'],
+    ['kotlin', 'kotlin'],
+    ['kt', 'kotlin'],
+    ['less', 'less'],
+    ['lua', 'lua'],
+    ['pascal', 'pascal'],
+    ['perl', 'perl'],
+    ['perl6', 'perl6'],
+    ['php', 'php'],
+    ['powershell', 'powershell'],
+    ['properties', 'properties'],
+    ['ps', 'powershell'],
+    ['py', 'python'],
+    ['python', 'python'],
+    ['r', 'r'],
+    ['raku', 'perl6'],
+    ['rb', 'ruby'],
+    ['rs', 'rust'],
+    ['ruby', 'ruby'],
+    ['rust', 'rust'],
+    ['sass', 'sass'],
+    ['scala', 'scala'],
+    ['scss', 'scss'],
+    ['sh', 'shell'],
+    ['shell', 'shell'],
+    ['sql', 'sql'],
+    ['swift', 'swift'],
+    ['ts', 'typescript'],
+    ['typescript', 'typescript'],
+    ['vb', 'vb'],
+    ['vbnet', 'vb'],
+    ['visualbasic', 'vb'],
+    ['xml', 'xml'],
+    ['yaml', 'yaml'],
+    ['yml', 'yaml'],
+]);
+
 export class Configuration {
     private readonly commentConfig = new Map<string, CommentConfig | undefined>();
     private readonly languageConfigFiles = new Map<string, string>();
@@ -13,6 +81,13 @@ export class Configuration {
      */
     public constructor() {
         this.UpdateLanguagesDefinitions();
+        this.languageConfigFiles.forEach((path, lan) => {
+            const markdownLan = MARKDOWN_CODE_TO_LANGUAGE_MAP.get(lan);
+            if (markdownLan && lan !== markdownLan) {
+                console.warn(`Markdown map incorrect ${lan} -> ${markdownLan}, change to ${lan} -> ${lan}`);
+                MARKDOWN_CODE_TO_LANGUAGE_MAP.set(lan, lan);
+            }
+        });
     }
 
     /**
@@ -42,6 +117,7 @@ export class Configuration {
      * @returns 
      */
     public async GetCommentConfiguration(languageCode: string): Promise<CommentConfig | undefined> {
+        languageCode = MARKDOWN_CODE_TO_LANGUAGE_MAP.get(languageCode) || languageCode;
 
         // * check if the language config has already been loaded
         if (this.commentConfig.has(languageCode)) {

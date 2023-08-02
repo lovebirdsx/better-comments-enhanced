@@ -1,23 +1,20 @@
 {
-    "name": "better-comments",
-    "displayName": "Better Comments",
+    "name": "better-comments-enhanced",
+    "displayName": "Better Comments Enhanced",
     "icon": "icon.png",
     "description": "Improve your code commenting by annotating with alert, informational, TODOs, and more!",
-    "version": "3.0.2",
-    "publisher": "aaron-bond",
+    "version": "1.0.0",
+    "publisher": "lovebird",
     "author": {
-        "name": "Aaron Bond"
+        "name": "Lovebird"
     },
-    "homepage": "https://github.com/aaron-bond/better-comments/blob/master/README.md",
+    "homepage": "https://github.com/lovebirdsx/better-comments-enhanced/blob/master/README.md",
     "license": "SEE LICENSE IN LICENSE.md",
     "repository": {
         "type": "git",
-        "url": "https://github.com/aaron-bond/better-comments"
+        "url": "https://github.com/lovebirdsx/better-comments-enhanced"
     },
-    "sponsor": {
-        "url": "https://github.com/sponsors/aaron-bond"
-    },
-    "bugs": "https://github.com/aaron-bond/better-comments/issues",
+    "bugs": "https://github.com/lovebirdsx/better-comments-enhanced/issues",
     "categories": [
         "Formatters"
     ],
@@ -50,6 +47,11 @@
         "configuration": {
             "title": "Better Comments configuration",
             "properties": {
+                "better-comments.highlightMarkdown": {
+                    "type": "boolean",
+                    "description": "Whether the markdown text highlighter should be active",
+                    "default": true
+                },
                 "better-comments.multilineComments": {
                     "type": "boolean",
                     "description": "Whether the multiline comment highlighter should be active",

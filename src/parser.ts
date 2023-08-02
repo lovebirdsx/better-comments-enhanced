@@ -1,281 +1,383 @@
 import * as vscode from 'vscode';
 import { Configuration } from './configuration';
 
-export class Parser {
-    private tags: CommentTag[] = [];
-    private expression: string = "";
+interface IInput {
+    activeEditor: vscode.TextEditor,
+    configuration: Configuration,
+    languageCode: string,
+    range?: vscode.Range,
+    contributions: Contributions,
+    tags: CommentTag[],
+}
 
-    private delimiter: string = "";
-    private blockCommentStart: string = "";
-    private blockCommentEnd: string = "";
+interface IDecoration {
+    type: vscode.TextEditorDecorationType,
+    range: vscode.Range,
+}
 
-    private highlightSingleLineComments = true;
-    private highlightMultilineComments = false;
-    private highlightJSDoc = false;
+interface ICommentFormat {
+    blockCommentStart: string;
+    blockCommentEnd: string;
+    delimiter: string;
+}
 
-    // * this will allow plaintext files to show comment highlighting if switched on
-    private isPlainText = false;
+interface IParserState extends ICommentFormat {
+    supportedLanguage: boolean;
+    ignoreFirstLine: boolean;
+    isPlainText: boolean;
+    highlightJSDoc: boolean;
+    highlightSingleLineComments: boolean;
+    highlightMultilineComments: boolean;
+}
 
-    // * this is used to prevent the first line of the file (specifically python) from coloring like other comments
-    private ignoreFirstLine = false;
+function escapeRegExp(input: string): string {
+    return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
+}
 
-    // * this is used to trigger the events when a supported language code is found
-    public supportedLanguage = true;
+function genCommentFormat(
+    singleLine: string | string[] | null,
+    start: string | null = null,
+    end: string | null = null): ICommentFormat {
 
-    // Read from the package.json
-    private contributions: Contributions = vscode.workspace.getConfiguration('better-comments') as any;
+    const r: ICommentFormat = {
+        blockCommentStart: "",
+        blockCommentEnd: "",
+        delimiter: "",
+    };
 
-    // The configuration necessary to find supported languages on startup
-    private configuration: Configuration;
-
-    /**
-     * Creates a new instance of the Parser class
-     * @param configuration 
-     */
-    public constructor(config: Configuration) {
-
-        this.configuration = config;
-
-        this.setTags();
+    // If no single line comment delimiter is passed, single line comments are not supported
+    if (singleLine) {
+        if (typeof singleLine === 'string') {
+            r.delimiter = escapeRegExp(singleLine).replace(/\//ig, "\\/");
+        } else if (singleLine.length > 0) {
+            // * if multiple delimiters are passed, the language has more than one single line comment format
+            var delimiters = singleLine.map(s => escapeRegExp(s)).join("|");
+            r.delimiter = delimiters;
+        }
     }
 
-    /**
-     * Sets the regex to be used by the matcher based on the config specified in the package.json
-     * @param languageCode The short code of the current language
-     * https://code.visualstudio.com/docs/languages/identifiers
-     */
-    public async SetRegex(languageCode: string) {
-        await this.setDelimiter(languageCode);
-
-        // if the language isn't supported, we don't need to go any further
-        if (!this.supportedLanguage) {
-            return;
-        }
-
-        let characters: Array<string> = [];
-        for (let commentTag of this.tags) {
-            characters.push(commentTag.escapedTag);
-        }
-
-        if (this.isPlainText && this.contributions.highlightPlainText) {
-            // start by tying the regex to the first character in a line
-            this.expression = "(^)+([ \\t]*[ \\t]*)";
-        } else {
-            // start by finding the delimiter (//, --, #, ') with optional spaces or tabs
-            this.expression = "(" + this.delimiter + ")+( |\t)*";
-        }
-
-        // Apply all configurable comment start tags
-        this.expression += "(";
-        this.expression += characters.join("|");
-        this.expression += ")+(.*)";
+    if (start && end) {
+        r.blockCommentStart = escapeRegExp(start);
+        r.blockCommentEnd = escapeRegExp(end);
     }
 
-    /**
-     * Finds all single line comments delimited by a given delimiter and matching tags specified in package.json
-     * @param activeEditor The active text editor containing the code document
-     */
-    public FindSingleLineComments(activeEditor: vscode.TextEditor): void {
+    return r;
+}
 
-        // If highlight single line comments is off, single line comments are not supported for this language
-        if (!this.highlightSingleLineComments) return;
+async function processState(input: IInput): Promise<IParserState> {
+    const r: IParserState = {} as IParserState;
+    r.supportedLanguage = false;
+    r.ignoreFirstLine = false;
+    r.isPlainText = false;
 
-        let text = activeEditor.document.getText();
+    const config = await input.configuration.GetCommentConfiguration(input.languageCode);
+    if (config) {
+        const blockCommentStart = config.blockComment ? config.blockComment[0] : null;
+        const blockCommentEnd = config.blockComment ? config.blockComment[1] : null;
 
-        // if it's plain text, we have to do mutliline regex to catch the start of the line with ^
-        let regexFlags = (this.isPlainText) ? "igm" : "ig";
-        let regEx = new RegExp(this.expression, regexFlags);
+        const commentFormat = genCommentFormat(config.lineComment || blockCommentStart, blockCommentStart, blockCommentEnd);
+        Object.assign(r, commentFormat);
 
-        let match: any;
-        while (match = regEx.exec(text)) {
-            let startPos = activeEditor.document.positionAt(match.index);
-            let endPos = activeEditor.document.positionAt(match.index + match[0].length);
-            let range = { range: new vscode.Range(startPos, endPos) };
+        r.supportedLanguage = true;
+        r.highlightSingleLineComments = !!blockCommentStart;
+        r.highlightMultilineComments = false;
+        if (blockCommentStart && blockCommentEnd) {
+            r.highlightMultilineComments = input.contributions.multilineComments;
+        }
+    }
 
-            // Required to ignore the first line of .py files (#61)
-            if (this.ignoreFirstLine && startPos.line === 0 && startPos.character === 0) {
-                continue;
-            }
+    switch (input.languageCode) {
+        case "apex":
+        case "javascript":
+        case "javascriptreact":
+        case "typescript":
+        case "typescriptreact":
+            r.highlightJSDoc = true;
+            break;
+
+        case "elixir":
+        case "python":
+        case "tcl":
+            r.ignoreFirstLine = true;
+            break;
+        
+        case "plaintext":
+            r.isPlainText = true;
+
+            // If highlight plaintext is enabled, this is a supported language
+            r.supportedLanguage = input.contributions.highlightPlainText;
+            break;
+    }
+
+    return r;
+}
+    
+function genSingleLineRegex(input: IInput, s: IParserState): string {
+    // if the language isn't supported, we don't need to go any further
+    if (!s.supportedLanguage) {
+        return '';
+    }
+
+    const characters: Array<string> = [];
+    for (const commentTag of input.tags) {
+        characters.push(commentTag.escapedTag);
+    }
+
+    let expression: string;
+    if (s.isPlainText && input.contributions.highlightPlainText) {
+        // start by tying the regex to the first character in a line
+        expression = "(^)+([ \\t]*[ \\t]*)";
+    } else {
+        // start by finding the delimiter (//, --, #, ') with optional spaces or tabs
+        expression = "(" + s.delimiter + ")+( |\t)*";
+    }
+
+    // Apply all configurable comment start tags
+    expression += "(";
+    expression += characters.join("|");
+    expression += ")+(.*)";
+
+    return expression;
+}
+
+function findSingleLineComments(input: IInput, s: IParserState): IDecoration[] {
+    // If highlight single line comments is off, single line comments are not supported for this language
+    if (!s.highlightSingleLineComments)
+        return [];
+
+    const text = input.activeEditor.document.getText(input.range);
+
+    // if it's plain text, we have to do mutliline regex to catch the start of the line with ^
+    const regexFlags = (s.isPlainText) ? "igm" : "ig";
+    const regEx = new RegExp(genSingleLineRegex(input, s), regexFlags);
+
+    let match: RegExpExecArray | null;
+    const decorations: IDecoration[] = [];
+    const offset = input.range ? input.activeEditor.document.offsetAt(input.range.start) : 0;
+    while (match = regEx.exec(text)) {
+        const startPos = input.activeEditor.document.positionAt(offset + match.index);
+        const endPos = input.activeEditor.document.positionAt(offset + match.index + match[0].length);
+
+        // Required to ignore the first line of .py files (#61)
+        if (s.ignoreFirstLine && startPos.line === 0 && startPos.character === 0) {
+            continue;
+        }
+
+        // Find which custom delimiter was used in order to add it to the collection
+        const matchString = match[3] as string;
+        const matchTag = input.tags.find(item => item.tag.toLowerCase() === matchString.toLowerCase());
+
+        if (matchTag) {
+            decorations.push( {
+                type: matchTag.decoration,
+                range: new vscode.Range(startPos, endPos),
+            });
+        }
+    }
+
+    return decorations;
+}
+
+function findBlockComments(input: IInput, s: IParserState): IDecoration[] {
+    // If highlight multiline is off in package.json or doesn't apply to his language, return
+    if (!s.highlightMultilineComments) return [];
+    
+    const text = input.activeEditor.document.getText(input.range);
+
+    // Build up regex matcher for custom delimiter tags
+    const characters: Array<string> = [];
+    for (const commentTag of input.tags) {
+        characters.push(commentTag.escapedTag);
+    }
+
+    // Combine custom delimiters and the rest of the comment block matcher
+    let commentMatchString = "(^)+([ \\t]*[ \\t]*)(";
+    commentMatchString += characters.join("|");
+    commentMatchString += ")([ ]*|[:])+([^*/][^\\r\\n]*)";
+
+    // Use start and end delimiters to find block comments
+    let regexString = "(^|[ \\t])(";
+    regexString += s.blockCommentStart;
+    regexString += "[\\s])+([\\s\\S]*?)(";
+    regexString += s.blockCommentEnd;
+    regexString += ")";
+
+    const regEx = new RegExp(regexString, "gm");
+    const commentRegEx = new RegExp(commentMatchString, "igm");
+
+    // Find the multiline comment block
+    let match: any;
+    const decorations: IDecoration[] = [];
+    const offset = input.range ? input.activeEditor.document.offsetAt(input.range.start) : 0;
+    while (match = regEx.exec(text)) {
+        const commentBlock = match[0];
+
+        // Find the line
+        let line;
+        while (line = commentRegEx.exec(commentBlock)) {
+            const startPos = input.activeEditor.document.positionAt(offset + match.index + line.index + line[2].length);
+            const endPos = input.activeEditor.document.positionAt(offset + match.index + line.index + line[0].length);
 
             // Find which custom delimiter was used in order to add it to the collection
-            let matchTag = this.tags.find(item => item.tag.toLowerCase() === match[3].toLowerCase());
+            const matchString = line[3] as string;
+            const matchTag = input.tags.find(item => item.tag.toLowerCase() === matchString.toLowerCase());
 
             if (matchTag) {
-                matchTag.ranges.push(range);
+                decorations.push( {
+                    type: matchTag.decoration,
+                    range: new vscode.Range(startPos, endPos),
+                });
             }
         }
     }
 
-    /**
-     * Finds block comments as indicated by start and end delimiter
-     * @param activeEditor The active text editor containing the code document
-     */
-    public FindBlockComments(activeEditor: vscode.TextEditor): void {
+    return decorations;
+}
 
-        // If highlight multiline is off in package.json or doesn't apply to his language, return
-        if (!this.highlightMultilineComments) return;
+function findJSDocComments(input: IInput, s: IParserState): IDecoration[] {
+    // If highlight multiline is off in package.json or doesn't apply to his language, return
+    if (!s.highlightMultilineComments && !s.highlightJSDoc) return [];
+
+    const text = input.activeEditor.document.getText(input.range);
+
+    // Build up regex matcher for custom delimiter tags
+    const characters: Array<string> = [];
+    for (const commentTag of input.tags) {
+        characters.push(commentTag.escapedTag);
+    }
+
+    // Combine custom delimiters and the rest of the comment block matcher
+    let commentMatchString = "(^)+([ \\t]*\\*[ \\t]*)("; // Highlight after leading *
+    const regEx = /(^|[ \t])(\/\*\*)+([\s\S]*?)(\*\/)/gm; // Find rows of comments matching pattern /** */
+
+    commentMatchString += characters.join("|");
+    commentMatchString += ")([ ]*|[:])+([^*/][^\\r\\n]*)";
+
+    const commentRegEx = new RegExp(commentMatchString, "igm");
+
+    // Find the multiline comment block
+    let match: any;
+    const decorations: IDecoration[] = [];
+    const offset = input.range ? input.activeEditor.document.offsetAt(input.range.start) : 0;
+    while (match = regEx.exec(text)) {
+        const commentBlock = match[0];
+
+        // Find the line
+        let line;        
+        while (line = commentRegEx.exec(commentBlock)) {
+            const startPos = input.activeEditor.document.positionAt(offset + match.index + line.index + line[2].length);
+            const endPos = input.activeEditor.document.positionAt(offset + match.index + line.index + line[0].length);
+
+            // Find which custom delimiter was used in order to add it to the collection
+            const matchString = line[3] as string;
+            const matchTag = input.tags.find(item => item.tag.toLowerCase() === matchString.toLowerCase());
+
+            if (matchTag) {
+                decorations.push({
+                    type: matchTag.decoration,
+                    range: new vscode.Range(startPos, endPos),
+                });
+            }
+        }
+    }
+
+    return decorations;
+}
+
+function findMarkdownTextComments(input: IInput): IDecoration[] {
+    if (input.languageCode !== 'markdown')
+        return [];
+
+    if (!input.contributions.highlightMarkdown) {
+        return [];
+    }
+    
+    const characters: Array<string> = [];
+    for (const commentTag of input.tags) {
+        characters.push(commentTag.escapedTag);
+    }
+
+    let expression = '^[ \\t]*(\\* |- |\\* \\[ \\] |- \\[ \\])[ \\t]*';
+    expression += '(';
+    expression += characters.join('|');
+    expression += ')+(.*)';
+
+    const text = input.activeEditor.document.getText(input.range);
+
+    let match: RegExpExecArray | null;
+    const decorations: IDecoration[] = [];
+    const regEx = new RegExp(expression, 'igm');
+    while (match = regEx.exec(text)) {
+        const startPos = input.activeEditor.document.positionAt(match.index);
+        const endPos = input.activeEditor.document.positionAt(match.index + match[0].length);
+
+        // Find which custom delimiter was used in order to add it to the collection
+        const matchString = match[2];
+        const matchTag = input.tags.find(item => item.tag.toLowerCase() === matchString.toLowerCase());
+
+        if (matchTag) {
+            decorations.push( {
+                type: matchTag.decoration,
+                range: new vscode.Range(startPos, endPos),
+            });
+        }
+    }
+
+    return decorations;
+}
+
+async function findMarkdownCodeComments(input: IInput): Promise<IDecoration[]> {
+    if (input.languageCode !== 'markdown')
+        return [];
+
+    const text = input.activeEditor.document.getText(input.range);
+
+    // Regular expression to match code blocks in Markdown
+    const regEx = /```\s*(\w+)\s*([\s\S]*?)```/gm;
+
+    let match: RegExpExecArray | null;
+    const decorations: IDecoration[] = [];
+    while (match = regEx.exec(text)) {
+        const codeBlock = match[2];
+        const languageCode = match[1];
+        const codeBLockIndex = match[0].indexOf(codeBlock);
         
-        let text = activeEditor.document.getText();
+        const startPos = input.activeEditor.document.positionAt(match.index + codeBLockIndex);
+        const endPos = input.activeEditor.document.positionAt(match.index + codeBLockIndex + match[2].length);
+        const newInput: IInput = {
+            ...input,
+            languageCode: languageCode,
+            range: new vscode.Range(startPos, endPos)
+        };
+        const newState = await processState(newInput);
 
-        // Build up regex matcher for custom delimiter tags
-        let characters: Array<string> = [];
-        for (let commentTag of this.tags) {
-            characters.push(commentTag.escapedTag);
-        }
-
-        // Combine custom delimiters and the rest of the comment block matcher
-        let commentMatchString = "(^)+([ \\t]*[ \\t]*)(";
-        commentMatchString += characters.join("|");
-        commentMatchString += ")([ ]*|[:])+([^*/][^\\r\\n]*)";
-
-        // Use start and end delimiters to find block comments
-        let regexString = "(^|[ \\t])(";
-        regexString += this.blockCommentStart;
-        regexString += "[\\s])+([\\s\\S]*?)(";
-        regexString += this.blockCommentEnd;
-        regexString += ")";
-
-        let regEx = new RegExp(regexString, "gm");
-        let commentRegEx = new RegExp(commentMatchString, "igm");
-
-        // Find the multiline comment block
-        let match: any;
-        while (match = regEx.exec(text)) {
-            let commentBlock = match[0];
-
-            // Find the line
-            let line;
-            while (line = commentRegEx.exec(commentBlock)) {
-                let startPos = activeEditor.document.positionAt(match.index + line.index + line[2].length);
-                let endPos = activeEditor.document.positionAt(match.index + line.index + line[0].length);
-                let range: vscode.DecorationOptions = { range: new vscode.Range(startPos, endPos) };
-
-                // Find which custom delimiter was used in order to add it to the collection
-                let matchString = line[3] as string;
-                let matchTag = this.tags.find(item => item.tag.toLowerCase() === matchString.toLowerCase());
-
-                if (matchTag) {
-                    matchTag.ranges.push(range);
-                }
-            }
-        }
+        decorations.splice(decorations.length, 0, ...findSingleLineComments(newInput, newState));
+        decorations.splice(decorations.length, 0, ...findBlockComments(newInput, newState));
     }
+    return decorations;
+}
 
-    /**
-     * Finds all multiline comments starting with "*"
-     * @param activeEditor The active text editor containing the code document
-     */
-    public FindJSDocComments(activeEditor: vscode.TextEditor): void {
+export class Parser {
+    private readonly tags: CommentTag[] = [];
 
-        // If highlight multiline is off in package.json or doesn't apply to his language, return
-        if (!this.highlightMultilineComments && !this.highlightJSDoc) return;
+    // Read from the package.json
+    private readonly contributions: Contributions = vscode.workspace.getConfiguration('better-comments') as any;
 
-        let text = activeEditor.document.getText();
+    // The configuration necessary to find supported languages on startup
+    private readonly configuration: Configuration;
 
-        // Build up regex matcher for custom delimiter tags
-        let characters: Array<string> = [];
-        for (let commentTag of this.tags) {
-            characters.push(commentTag.escapedTag);
-        }
-
-        // Combine custom delimiters and the rest of the comment block matcher
-        let commentMatchString = "(^)+([ \\t]*\\*[ \\t]*)("; // Highlight after leading *
-        let regEx = /(^|[ \t])(\/\*\*)+([\s\S]*?)(\*\/)/gm; // Find rows of comments matching pattern /** */
-
-        commentMatchString += characters.join("|");
-        commentMatchString += ")([ ]*|[:])+([^*/][^\\r\\n]*)";
-
-        let commentRegEx = new RegExp(commentMatchString, "igm");
-
-        // Find the multiline comment block
-        let match: any;
-        while (match = regEx.exec(text)) {
-            let commentBlock = match[0];
-
-            // Find the line
-            let line;
-            while (line = commentRegEx.exec(commentBlock)) {
-                let startPos = activeEditor.document.positionAt(match.index + line.index + line[2].length);
-                let endPos = activeEditor.document.positionAt(match.index + line.index + line[0].length);
-                let range: vscode.DecorationOptions = { range: new vscode.Range(startPos, endPos) };
-
-                // Find which custom delimiter was used in order to add it to the collection
-                let matchString = line[3] as string;
-                let matchTag = this.tags.find(item => item.tag.toLowerCase() === matchString.toLowerCase());
-
-                if (matchTag) {
-                    matchTag.ranges.push(range);
-                }
-            }
-        }
-    }
-
-    /**
-     * Apply decorations after finding all relevant comments
-     * @param activeEditor The active text editor containing the code document
-     */
-    public ApplyDecorations(activeEditor: vscode.TextEditor): void {
-        for (let tag of this.tags) {
-            activeEditor.setDecorations(tag.decoration, tag.ranges);
-
-            // clear the ranges for the next pass
-            tag.ranges.length = 0;
-        }
-    }
-
-    //#region  Private Methods
-
-    /**
-     * Sets the comment delimiter [//, #, --, '] of a given language
-     * @param languageCode The short code of the current language
-     * https://code.visualstudio.com/docs/languages/identifiers
-     */
-    private async setDelimiter(languageCode: string): Promise<void> {
-        this.supportedLanguage = false;
-        this.ignoreFirstLine = false;
-        this.isPlainText = false;
-
-        const config = await this.configuration.GetCommentConfiguration(languageCode);
-        if (config) {
-            let blockCommentStart = config.blockComment ? config.blockComment[0] : null;
-            let blockCommentEnd = config.blockComment ? config.blockComment[1] : null;
-
-            this.setCommentFormat(config.lineComment || blockCommentStart, blockCommentStart, blockCommentEnd);
-
-            this.supportedLanguage = true;
-        }
-
-        switch (languageCode) {
-            case "apex":
-            case "javascript":
-            case "javascriptreact":
-            case "typescript":
-            case "typescriptreact":
-                this.highlightJSDoc = true;
-                break;
-
-            case "elixir":
-            case "python":
-            case "tcl":
-                this.ignoreFirstLine = true;
-                break;
-            
-            case "plaintext":
-                this.isPlainText = true;
-
-                // If highlight plaintext is enabled, this is a supported language
-                this.supportedLanguage = this.contributions.highlightPlainText;
-                break;
-        }
+    public constructor(config: Configuration) {
+        this.configuration = config;
+        this.setTags();
     }
 
     /**
      * Sets the highlighting tags up for use by the parser
      */
     private setTags(): void {
-        let items = this.contributions.tags;
-        for (let item of items) {
-            let options: vscode.DecorationRenderOptions = { color: item.color, backgroundColor: item.backgroundColor };
+        const items = this.contributions.tags;
+        for (const item of items) {
+            const options: vscode.DecorationRenderOptions = { color: item.color, backgroundColor: item.backgroundColor };
 
             // ? the textDecoration is initialised to empty so we can concat a preceeding space on it
             options.textDecoration = "";
@@ -296,7 +398,7 @@ export class Parser {
                 options.fontStyle = "italic";
             }
 
-            let escapedSequence = item.tag.replace(/([()[{*+.$^\\|?])/g, '\\$1');
+            const escapedSequence = item.tag.replace(/([()[{*+.$^\\|?])/g, '\\$1');
             this.tags.push({
                 tag: item.tag,
                 escapedTag: escapedSequence.replace(/\//gi, "\\/"), // ! hardcoded to escape slashes
@@ -306,54 +408,44 @@ export class Parser {
         }
     }
 
-    /**
-     * Escapes a given string for use in a regular expression
-     * @param input The input string to be escaped
-     * @returns {string} The escaped string
-     */
-    private escapeRegExp(input: string): string {
-        return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
+    private genInput(activeEditor: vscode.TextEditor): IInput {
+        return {
+            activeEditor: activeEditor,
+            tags: this.tags,
+            contributions: this.contributions,  
+            configuration: this.configuration,
+            languageCode: activeEditor.document.languageId,
+        };
     }
 
-    /**
-     * Set up the comment format for single and multiline highlighting
-     * @param singleLine The single line comment delimiter. If NULL, single line is not supported
-     * @param start The start delimiter for block comments
-     * @param end The end delimiter for block comments
-     */
-    private setCommentFormat(
-            singleLine: string | string[] | null,
-            start: string | null = null,
-            end: string | null = null): void {
+    public async UpdateDecorations(activeEditor: vscode.TextEditor): Promise<void> {
+        const map = new Map<vscode.TextEditorDecorationType, vscode.Range[]>();
 
-        this.delimiter = "";
-        this.blockCommentStart = "";
-        this.blockCommentEnd = "";
-
-        // If no single line comment delimiter is passed, single line comments are not supported
-        if (singleLine) {
-            if (typeof singleLine === 'string') {
-                this.delimiter = this.escapeRegExp(singleLine).replace(/\//ig, "\\/");
-            }
-            else if (singleLine.length > 0) {
-                // * if multiple delimiters are passed, the language has more than one single line comment format
-                var delimiters = singleLine
-                            .map(s => this.escapeRegExp(s))
-                            .join("|");
-                this.delimiter = delimiters;
+        function addDecoration(decorations: IDecoration[]) {
+            for (const decoration of decorations) {
+                const { type, range } = decoration;
+                const ranges = map.get(type);
+                if (ranges) {
+                    ranges.push(range);
+                } else {
+                    map.set(type, [range]);
+                }
             }
         }
-        else {
-            this.highlightSingleLineComments = false;
-        }
 
-        if (start && end) {
-            this.blockCommentStart = this.escapeRegExp(start);
-            this.blockCommentEnd = this.escapeRegExp(end);
+        const intput = this.genInput(activeEditor);
+        const state = await processState(intput);
+        addDecoration(findSingleLineComments(intput, state));
+        addDecoration(findBlockComments(intput, state));
+        addDecoration(findJSDocComments(intput, state));
+        addDecoration(findMarkdownTextComments(intput));
+        addDecoration(await findMarkdownCodeComments(intput));
 
-            this.highlightMultilineComments = this.contributions.multilineComments;
+        for (const tag of this.tags) {
+            const ranges = map.get(tag.decoration) || [];
+            activeEditor.setDecorations(tag.decoration, []);
+            activeEditor.setDecorations(tag.decoration, ranges);
         }
     }
-
     //#endregion
 }
