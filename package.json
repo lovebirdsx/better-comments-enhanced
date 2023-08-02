@@ -3,7 +3,7 @@
     "displayName": "Better Comments Enhanced",
     "icon": "icon.png",
     "description": "Improve your code commenting by annotating with alert, informational, TODOs, and more!",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "publisher": "lovebird",
     "author": {
         "name": "Lovebird"
