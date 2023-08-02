@@ -22,7 +22,7 @@ With this extension, you will be able to categorise your annotations into:
 
 This extension can be configured in User Settings or Workspace settings.
 
-`"better-comments.highlightMarkdown": true`
+`"better-comments.highlightMarkdown": true`  
  This setting will control whether comments in markdown files are styled using the annotation tags.
 
 `"better-comments.multilineComments": true`  
