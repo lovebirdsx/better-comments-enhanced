@@ -297,7 +297,7 @@ function findMarkdownTextComments(input: IInput): IDecoration[] {
         characters.push(commentTag.escapedTag);
     }
 
-    let expression = '^[ \\t]*(\\* |- |\\* \\[ \\] |- \\[ \\]|[0-9]+[.])[ \\t]*';
+    let expression = '^[ \\t]*(\\* |- |\\* \\[.?\\] |- \\[.?\\]|[0-9]+[.])[ \\t]*';
     expression += '(';
     expression += characters.join('|');
     expression += ')+(.*)';

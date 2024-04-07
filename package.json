@@ -3,7 +3,7 @@
     "displayName": "Better Comments (Markdown Support)",
     "icon": "icon.png",
     "description": "Improve your code commenting by annotating with alert, informational, TODOs, and more!",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "publisher": "lovebird",
     "author": {
         "name": "Lovebird"
