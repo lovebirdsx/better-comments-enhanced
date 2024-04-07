@@ -1,9 +1,9 @@
 {
     "name": "better-comments-enhanced",
-    "displayName": "Better Comments Enhanced",
+    "displayName": "Better Comments (Markdown Support)",
     "icon": "icon.png",
     "description": "Improve your code commenting by annotating with alert, informational, TODOs, and more!",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "publisher": "lovebird",
     "author": {
         "name": "Lovebird"
@@ -35,6 +35,8 @@
     "browser": "./out/web/extension.js",
     "main": "./out/extension",
     "scripts": {
+        "package": "vsce package",
+        "publish": "vsce publish",
         "vscode:prepublish": "npm run compile && npm run package-web",
         "compile": "tsc -p ./",
         "watch": "tsc -watch -p ./",
